@@ -23,7 +23,7 @@ const loginSchema = z.object({
 
 const Login = () => {
   const navigate = useNavigate();
-  const { login, loading, error, user } = useAuth(); // Added user from Redux state
+  const { login, loading, error } = useAuth(); // Removed user from Redux state
   const [showPassword, setShowPassword] = useState(false);
 
   const form = useForm({
@@ -36,16 +36,23 @@ const Login = () => {
 
   const onSubmit = async (data) => {
     try {
-      await login(data); // Now sends email and password
-      const currentUser = user || JSON.parse(localStorage.getItem("user"));
-      if (currentUser?.role === "doctor") {
+      // use unwrap to throw on rejected promise
+      const resultAction = await login(data);
+      // if using RTK, resultAction.payload available; or use .unwrap() if returned by dispatch
+      // Try unwrap (if using dispatch(login).unwrap() in caller, adjust)
+      // If login was dispatched directly (not unwrapped), check resultAction.payload
+      const payload = resultAction?.payload || resultAction;
+      // determine user
+      const user = payload?.user || JSON.parse(localStorage.getItem("user"));
+      if (user?.role === "is_doctor" || user?.role === "doctor") {
         navigate("/doctor/dashboard");
-      } else if (currentUser?.role === "patient") {
+      } else if (user?.role === "is_patient" || user?.role === "patient") {
         navigate("/patient/dashboard");
       } else {
-        console.error("Unknown user role");
+        navigate("/"); // fallback
       }
     } catch (err) {
+      // If you used dispatch(login).unwrap(), you'd catch here
       console.error("Login failed:", err);
     }
   };
@@ -153,12 +160,6 @@ const Login = () => {
                   />
                   <span className="text-sm text-gray-600">Remember me</span>
                 </label>
-                <Link
-                  to="/forgot-password"
-                  className="text-sm text-teal-600 hover:text-teal-700 font-medium"
-                >
-                  Forgot password?
-                </Link>
               </div>
 
               <Button
@@ -217,6 +218,15 @@ const Login = () => {
               Privacy Policy
             </a>
           </div>
+
+          <p className="text-sm text-right mt-2">
+            <Link
+              to="/password-reset"
+              className="text-blue-600 hover:underline"
+            >
+              Forgot password?
+            </Link>
+          </p>
         </div>
       </div>
     </div>

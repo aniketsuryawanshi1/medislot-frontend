@@ -1,13 +1,8 @@
 import { createSlice } from "@reduxjs/toolkit";
 import {
-  setAccessToken,
-  clearAuth,
-  initializeAuth,
-} from "../../services/authService";
-import {
   login,
   register,
-  logout,
+  logout, // <- ensure logout thunk is imported
   verifyOtp,
   resendOtp,
   requestPasswordReset,
@@ -18,11 +13,10 @@ import {
   deleteUser,
 } from "./authThunks";
 
-// Initialize state based on authService
 const initialState = {
   user: JSON.parse(localStorage.getItem("user")) || null,
   users: [],
-  isAuthenticated: initializeAuth(),
+  isAuthenticated: !!localStorage.getItem("accessToken"),
   loading: false,
   error: null,
 };
@@ -42,84 +36,114 @@ const authSlice = createSlice({
     logoutUser: (state) => {
       state.user = null;
       state.isAuthenticated = false;
-      clearAuth();
+      localStorage.removeItem("accessToken");
+      localStorage.removeItem("refreshToken");
+      localStorage.removeItem("user");
     },
   },
   extraReducers: (builder) => {
     builder
+      // LOGIN
       .addCase(login.pending, (state) => {
         state.loading = true;
+        state.error = null;
       })
       .addCase(login.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload.user;
-        state.isAuthenticated = true;
-        setAccessToken(action.payload.access); // Set header via authService
+        state.user =
+          action.payload?.user || JSON.parse(localStorage.getItem("user"));
+        state.isAuthenticated = !!localStorage.getItem("accessToken");
+        state.error = null;
       })
       .addCase(login.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.payload;
+        state.error = action.payload || action.error?.message;
       })
+
+      // REGISTER
       .addCase(register.pending, (state) => {
         state.loading = true;
+        state.error = null;
       })
-      .addCase(register.fulfilled, (state, action) => {
+      .addCase(register.fulfilled, (state) => {
         state.loading = false;
-        // Registration may not auto-login; handle OTP if needed
       })
       .addCase(register.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.payload;
+        state.error = action.payload || action.error?.message;
       })
+
+      // LOGOUT
       .addCase(logout.fulfilled, (state) => {
         state.user = null;
         state.isAuthenticated = false;
-        clearAuth();
+        state.loading = false;
+        state.error = null;
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("refreshToken");
+        localStorage.removeItem("user");
       })
+      .addCase(logout.rejected, (state, action) => {
+        // still clear local state on failed remote logout if necessary
+        state.loading = false;
+        state.error = action.payload || action.error?.message;
+      })
+
+      // VERIFY OTP
       .addCase(verifyOtp.fulfilled, (state, action) => {
-        state.user = action.payload.user;
-        state.isAuthenticated = true;
-        setAccessToken(
-          action.payload.access || localStorage.getItem("accessToken")
-        );
+        const payloadUser =
+          action.payload?.user || JSON.parse(localStorage.getItem("user"));
+        if (payloadUser) {
+          state.user = payloadUser;
+          state.isAuthenticated = !!localStorage.getItem("accessToken");
+        }
+        state.error = null;
       })
-      .addCase(confirmPasswordReset.fulfilled, (state, action) => {
-        state.user = action.payload.user;
-        state.isAuthenticated = true;
-        setAccessToken(
-          action.payload.access || localStorage.getItem("accessToken")
-        );
-      })
+
+      // PASSWORD RESET / USERS
       .addCase(getUsers.fulfilled, (state, action) => {
         state.users = action.payload;
       })
       .addCase(getUserById.fulfilled, (state, action) => {
         const index = state.users.findIndex(
-          (u) => u.uuid === action.payload.uuid
+          (u) => u.id === action.payload.id || u.uuid === action.payload.uuid
         );
         if (index !== -1) state.users[index] = action.payload;
       })
       .addCase(updateUser.fulfilled, (state, action) => {
-        const index = state.users.findIndex(
-          (u) => u.uuid === action.payload.uuid
+        const idx = state.users.findIndex(
+          (u) => u.id === action.payload.id || u.uuid === action.payload.uuid
         );
-        if (index !== -1) state.users[index] = action.payload;
-        if (state.user?.uuid === action.payload.uuid)
+        if (idx !== -1) state.users[idx] = action.payload;
+        if (
+          state.user?.id === action.payload.id ||
+          state.user?.uuid === action.payload.uuid
+        )
           state.user = action.payload;
       })
       .addCase(deleteUser.fulfilled, (state, action) => {
-        state.users = state.users.filter((u) => u.uuid !== action.payload);
-        if (state.user?.uuid === action.payload) {
+        state.users = state.users.filter(
+          (u) => u.id !== action.payload && u.uuid !== action.payload
+        );
+        if (
+          state.user?.id === action.payload ||
+          state.user?.uuid === action.payload
+        ) {
           state.user = null;
           state.isAuthenticated = false;
-          clearAuth();
+          localStorage.removeItem("accessToken");
+          localStorage.removeItem("refreshToken");
+          localStorage.removeItem("user");
         }
       })
+
+      // Generic rejected matcher
       .addMatcher(
         (action) => action.type.endsWith("/rejected"),
         (state, action) => {
           state.loading = false;
-          state.error = action.payload;
+          // keep existing error if payload absent
+          state.error = action.payload || action.error?.message || state.error;
         }
       );
   },

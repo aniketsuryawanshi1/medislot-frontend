@@ -28,7 +28,7 @@ const verifyOtpSchema = z.object({
 const VerifyOtp = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { verifyOtp, loading, error, user } = useAuth();
+  const { verifyOtp, resendOtp, loading, error, user } = useAuth(); // Added resendOtp
   const [success, setSuccess] = useState(false);
   const email = location.state?.email || ""; // From Register navigation
 
@@ -49,6 +49,15 @@ const VerifyOtp = () => {
       }, 2000);
     } catch (err) {
       console.error("OTP verification failed:", err);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    try {
+      await resendOtp({ email }); // Use the thunk
+      alert("OTP resent successfully!");
+    } catch (err) {
+      console.error("Resend failed:", err);
     }
   };
 
@@ -251,10 +260,8 @@ const VerifyOtp = () => {
                   <button
                     type="button"
                     className="text-blue-600 hover:text-blue-700 font-medium"
-                    onClick={() => {
-                      // Implement resend logic if needed
-                      console.log("Resend OTP");
-                    }}
+                    onClick={handleResendOtp}
+                    disabled={loading}
                   >
                     Resend
                   </button>

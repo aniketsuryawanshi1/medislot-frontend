@@ -1,111 +1,186 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
-import AxiosInstance from "../../services/authService";
+import AxiosInstance, { setAccessToken } from "../../services/authService";
 
+// LOGIN - handle various backend token/key shapes and top-level user fields
 export const login = createAsyncThunk(
   "auth/login",
   async (credentials, { rejectWithValue }) => {
     try {
       const response = await AxiosInstance.post("auth/login/", credentials);
-      const { access, refresh, user } = response.data;
-      // Ensure user object includes role for navigation
-      if (!user || !user.role) {
-        throw new Error("Invalid user data received");
+      const data = response.data || {};
+
+      // Accept multiple possible token key names from backend
+      const access =
+        data.access || data.access_token || data.accessToken || data.token;
+      const refresh =
+        data.refresh || data.refresh_token || data.refreshToken || data.refresh;
+
+      // Build user object (support both data.user and top-level fields)
+      const user =
+        data.user ||
+        (data.username || data.email
+          ? {
+              username: data.username,
+              email: data.email,
+              full_name: data.full_name || data.user_full_name || "",
+              role: data.role || data.user_role || undefined,
+            }
+          : null);
+
+      // Persist tokens & user in localStorage under app-expected keys
+      if (access) {
+        localStorage.setItem("accessToken", access);
+        setAccessToken(access);
       }
-      localStorage.setItem("accessToken", access);
-      localStorage.setItem("refreshToken", refresh);
-      localStorage.setItem("user", JSON.stringify(user));
-      return { user, access, refresh };
+      if (refresh) {
+        localStorage.setItem("refreshToken", refresh);
+      }
+      if (user) {
+        localStorage.setItem("user", JSON.stringify(user));
+      }
+
+      // Return normalized payload
+      return { user, access, refresh, raw: data };
     } catch (error) {
-      return rejectWithValue(error.response?.data?.detail || "Login failed");
+      // prefer backend error object if present
+      const payload = error.response?.data || error.message || "Login failed";
+      return rejectWithValue(payload);
     }
   }
 );
 
+// REGISTER - keep as-is but return backend data
 export const register = createAsyncThunk(
   "auth/register",
   async (userData, { rejectWithValue }) => {
     try {
       const response = await AxiosInstance.post("auth/register/", userData);
-      // Assuming backend sends OTP and minimal response; handle if needed
-      return response.data; // May include user or OTP instructions
+      return response.data;
     } catch (error) {
       return rejectWithValue(
-        error.response?.data?.detail || "Registration failed"
+        error.response?.data || error.message || "Registration failed"
       );
     }
   }
 );
 
+// VERIFY OTP - allow tokens returned here too
+export const verifyOtp = createAsyncThunk(
+  "auth/verifyOtp",
+  async (payload, { rejectWithValue }) => {
+    try {
+      const response = await AxiosInstance.post("auth/verify-otp/", payload);
+      const data = response.data || {};
+
+      const access =
+        data.access || data.access_token || data.accessToken || data.token;
+      const refresh =
+        data.refresh || data.refresh_token || data.refreshToken || data.refresh;
+
+      const user =
+        data.user ||
+        (data.username || data.email
+          ? {
+              username: data.username,
+              email: data.email,
+              full_name: data.full_name || data.user_full_name || "",
+              role: data.role || data.user_role || undefined,
+            }
+          : null);
+
+      if (access) {
+        localStorage.setItem("accessToken", access);
+        setAccessToken(access);
+      }
+      if (refresh) {
+        localStorage.setItem("refreshToken", refresh);
+      }
+      if (user) {
+        localStorage.setItem("user", JSON.stringify(user));
+      }
+
+      return { user, access, refresh, raw: data };
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data || error.message || "OTP verification failed"
+      );
+    }
+  }
+);
+
+// LOGOUT thunk should exist and be exported from this file (if not, implement it)
 export const logout = createAsyncThunk(
   "auth/logout",
   async (_, { rejectWithValue }) => {
     try {
-      await AxiosInstance.post("auth/logout/");
-      return;
+      // Try remote logout; ignore errors but clear local storage
+      await AxiosInstance.post("auth/logout/").catch(() => {});
+      localStorage.removeItem("accessToken");
+      localStorage.removeItem("refreshToken");
+      localStorage.removeItem("user");
+      // unset header via authService
+      setAccessToken(null);
+      return {};
     } catch (error) {
-      return rejectWithValue(error.response?.data?.detail || "Logout failed");
+      return rejectWithValue(
+        error.response?.data || error.message || "Logout failed"
+      );
     }
   }
 );
 
 // Note: Token refresh is handled automatically by Axios interceptors in authService.js, so no manual thunk needed
 
-export const verifyOtp = createAsyncThunk(
-  "auth/verifyOtp",
-  async (otpData, { rejectWithValue }) => {
-    try {
-      const response = await AxiosInstance.post("auth/verify-otp/", otpData);
-      return response.data;
-    } catch (error) {
-      return rejectWithValue(
-        error.response?.data?.detail || "OTP verification failed"
-      );
-    }
-  }
-);
-
+// RESEND OTP
 export const resendOtp = createAsyncThunk(
   "auth/resendOtp",
   async (data, { rejectWithValue }) => {
     try {
-      const response = await AxiosInstance.post("auth/otp/resend/", data);
+      const response = await AxiosInstance.post("auth/otp/resend/", data); // Matches backend endpoint
       return response.data;
     } catch (error) {
       return rejectWithValue(
-        error.response?.data?.detail || "Resend OTP failed"
+        error.response?.data || error.message || "Resend OTP failed"
       );
     }
   }
 );
 
+// REQUEST PASSWORD RESET
 export const requestPasswordReset = createAsyncThunk(
   "auth/requestPasswordReset",
   async (email, { rejectWithValue }) => {
     try {
       const response = await AxiosInstance.post("auth/password-reset/", {
         email,
-      });
+      }); // Matches Passwordresetrequest.jsx
       return response.data;
     } catch (error) {
       return rejectWithValue(
-        error.response?.data?.detail || "Password reset request failed"
+        error.response?.data || error.message || "Password reset request failed"
       );
     }
   }
 );
 
+// CONFIRM PASSWORD RESET
 export const confirmPasswordReset = createAsyncThunk(
   "auth/confirmPasswordReset",
-  async ({ uid, token, newPassword }, { rejectWithValue }) => {
+  async ({ uidb64, token, password, password2 }, { rejectWithValue }) => {
     try {
       const response = await AxiosInstance.post(
-        `auth/password-reset-confirm/${uid}/${token}/`,
-        { new_password: newPassword }
-      );
+        "auth/password-reset-confirm/",
+        {
+          uidb64,
+          token,
+          password,
+          password2,
+        }
+      ); // Matches Passwordresetconfirm.jsx
       return response.data;
     } catch (error) {
       return rejectWithValue(
-        error.response?.data?.detail || "Password reset confirm failed"
+        error.response?.data || error.message || "Password reset confirm failed"
       );
     }
   }
