@@ -1,35 +1,60 @@
-import { useSelector, useDispatch } from "react-redux";
-import { useCallback } from "react";
+import { useDispatch, useSelector } from "react-redux";
 import {
-  loginUser,
-  registerUser,
-  logoutUser,
+  login,
+  register,
+  logout,
+  verifyOtp,
+  resendOtp,
+  requestPasswordReset,
+  confirmPasswordReset,
+  getUsers,
+  getUserById,
+  updateUser,
+  deleteUser,
 } from "../api/authentication/authThunks";
+import {
+  clearError,
+  setUser,
+  logoutUser,
+} from "../api/authentication/authSlice";
+import {
+  isAuthenticated as checkAuth,
+  getCurrentUser,
+} from "../api/authentication/authUtils";
 
 const useAuth = () => {
   const dispatch = useDispatch();
-  const { user, isAuthenticated, loading, error } = useSelector(
-    (state) => state.auth
-  );
-
-  const login = useCallback(
-    (credentials) => dispatch(loginUser(credentials)),
-    [dispatch]
-  );
-  const register = useCallback(
-    (data) => dispatch(registerUser(data)),
-    [dispatch]
-  );
-  const logout = useCallback(() => dispatch(logoutUser()), [dispatch]);
+  const authState = useSelector((state) => state.auth);
 
   return {
-    user,
-    isAuthenticated,
-    loading,
-    error,
-    login,
-    register,
-    logout,
+    // State
+    user: authState.user,
+    users: authState.users,
+    isAuthenticated: authState.isAuthenticated,
+    loading: authState.loading,
+    error: authState.error,
+
+    // Utility checks (prefer Redux state over localStorage for consistency)
+    isAuthenticated: authState.isAuthenticated || checkAuth(),
+    currentUser: authState.user || getCurrentUser(),
+
+    // Actions
+    login: (credentials) => dispatch(login(credentials)),
+    register: (userData) => dispatch(register(userData)),
+    logout: () => dispatch(logout()),
+    verifyOtp: (otpData) => dispatch(verifyOtp(otpData)),
+    resendOtp: (data) => dispatch(resendOtp(data)),
+    requestPasswordReset: (email) => dispatch(requestPasswordReset(email)),
+    confirmPasswordReset: (data) => dispatch(confirmPasswordReset(data)),
+    fetchUsers: () => dispatch(getUsers()),
+    fetchUserById: (uuid) => dispatch(getUserById(uuid)),
+    updateUser: (uuid, data) => dispatch(updateUser({ uuid, data })),
+    deleteUser: (uuid) => dispatch(deleteUser(uuid)),
+
+    // Slice actions
+    clearError: () => dispatch(clearError()),
+    setUser: (user) => dispatch(setUser(user)),
+    logoutUser: () => dispatch(logoutUser()),
   };
 };
 

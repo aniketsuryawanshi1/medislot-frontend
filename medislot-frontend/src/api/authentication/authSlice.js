@@ -1,103 +1,129 @@
 import { createSlice } from "@reduxjs/toolkit";
-import { loginUser, registerUser, logoutUser } from "./authThunks";
+import {
+  setAccessToken,
+  clearAuth,
+  initializeAuth,
+} from "../../services/authService";
+import {
+  login,
+  register,
+  logout,
+  verifyOtp,
+  resendOtp,
+  requestPasswordReset,
+  confirmPasswordReset,
+  getUsers,
+  getUserById,
+  updateUser,
+  deleteUser,
+} from "./authThunks";
 
-// Read from localStorage
-const user = JSON.parse(localStorage.getItem("user"));
-const accessToken = localStorage.getItem("accessToken");
-const refreshToken = localStorage.getItem("refreshToken");
-
+// Initialize state based on authService
 const initialState = {
-  user: user || null,
-  accessToken: accessToken || null,
-  refreshToken: refreshToken || null,
+  user: JSON.parse(localStorage.getItem("user")) || null,
+  users: [],
+  isAuthenticated: initializeAuth(),
   loading: false,
   error: null,
-  isAuthenticated: !!accessToken,
 };
 
 const authSlice = createSlice({
   name: "auth",
   initialState,
   reducers: {
-    setUser(state, action) {
-      state.user = action.payload.user;
-      state.accessToken = action.payload.accessToken;
-      state.refreshToken = action.payload.refreshToken;
-      state.isAuthenticated = true;
-      // Persist to localStorage
-      localStorage.setItem("user", JSON.stringify(action.payload.user));
-      localStorage.setItem("accessToken", action.payload.accessToken);
-      localStorage.setItem("refreshToken", action.payload.refreshToken);
-    },
-    clearUser(state) {
-      state.user = null;
-      state.accessToken = null;
-      state.refreshToken = null;
-      state.isAuthenticated = false;
+    clearError: (state) => {
       state.error = null;
-      // Remove from localStorage
-      localStorage.removeItem("user");
-      localStorage.removeItem("accessToken");
-      localStorage.removeItem("refreshToken");
+    },
+    setUser: (state, action) => {
+      state.user = action.payload;
+      state.isAuthenticated = true;
+      localStorage.setItem("user", JSON.stringify(action.payload));
+    },
+    logoutUser: (state) => {
+      state.user = null;
+      state.isAuthenticated = false;
+      clearAuth();
     },
   },
   extraReducers: (builder) => {
     builder
-      // Register
-      .addCase(registerUser.pending, (state) => {
+      .addCase(login.pending, (state) => {
         state.loading = true;
-        state.error = null;
       })
-      .addCase(registerUser.fulfilled, (state, action) => {
+      .addCase(login.fulfilled, (state, action) => {
         state.loading = false;
         state.user = action.payload.user;
-        state.accessToken = action.payload.accessToken;
-        state.refreshToken = action.payload.refreshToken;
         state.isAuthenticated = true;
-        // Persist to localStorage
-        localStorage.setItem("user", JSON.stringify(action.payload.user));
-        localStorage.setItem("accessToken", action.payload.accessToken);
-        localStorage.setItem("refreshToken", action.payload.refreshToken);
+        setAccessToken(action.payload.access); // Set header via authService
       })
-      .addCase(registerUser.rejected, (state, action) => {
+      .addCase(login.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.payload || "Registration failed";
+        state.error = action.payload;
       })
-      // Login
-      .addCase(loginUser.pending, (state) => {
+      .addCase(register.pending, (state) => {
         state.loading = true;
-        state.error = null;
       })
-      .addCase(loginUser.fulfilled, (state, action) => {
+      .addCase(register.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload.user;
-        state.accessToken = action.payload.accessToken;
-        state.refreshToken = action.payload.refreshToken;
-        state.isAuthenticated = true;
-        // Persist to localStorage
-        localStorage.setItem("user", JSON.stringify(action.payload.user));
-        localStorage.setItem("accessToken", action.payload.accessToken);
-        localStorage.setItem("refreshToken", action.payload.refreshToken);
+        // Registration may not auto-login; handle OTP if needed
       })
-      .addCase(loginUser.rejected, (state, action) => {
+      .addCase(register.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.payload || "Login failed";
-        state.isAuthenticated = false;
+        state.error = action.payload;
       })
-      // Logout
-      .addCase(logoutUser.fulfilled, (state) => {
+      .addCase(logout.fulfilled, (state) => {
         state.user = null;
-        state.accessToken = null;
-        state.refreshToken = null;
         state.isAuthenticated = false;
-        state.error = null;
-        // Remove from localStorage
-        localStorage.removeItem("user");
-        localStorage.removeItem("accessToken");
-        localStorage.removeItem("refreshToken");
-      });
+        clearAuth();
+      })
+      .addCase(verifyOtp.fulfilled, (state, action) => {
+        state.user = action.payload.user;
+        state.isAuthenticated = true;
+        setAccessToken(
+          action.payload.access || localStorage.getItem("accessToken")
+        );
+      })
+      .addCase(confirmPasswordReset.fulfilled, (state, action) => {
+        state.user = action.payload.user;
+        state.isAuthenticated = true;
+        setAccessToken(
+          action.payload.access || localStorage.getItem("accessToken")
+        );
+      })
+      .addCase(getUsers.fulfilled, (state, action) => {
+        state.users = action.payload;
+      })
+      .addCase(getUserById.fulfilled, (state, action) => {
+        const index = state.users.findIndex(
+          (u) => u.uuid === action.payload.uuid
+        );
+        if (index !== -1) state.users[index] = action.payload;
+      })
+      .addCase(updateUser.fulfilled, (state, action) => {
+        const index = state.users.findIndex(
+          (u) => u.uuid === action.payload.uuid
+        );
+        if (index !== -1) state.users[index] = action.payload;
+        if (state.user?.uuid === action.payload.uuid)
+          state.user = action.payload;
+      })
+      .addCase(deleteUser.fulfilled, (state, action) => {
+        state.users = state.users.filter((u) => u.uuid !== action.payload);
+        if (state.user?.uuid === action.payload) {
+          state.user = null;
+          state.isAuthenticated = false;
+          clearAuth();
+        }
+      })
+      .addMatcher(
+        (action) => action.type.endsWith("/rejected"),
+        (state, action) => {
+          state.loading = false;
+          state.error = action.payload;
+        }
+      );
   },
 });
 
-export const { setUser, clearUser } = authSlice.actions;
+export const { clearError, setUser, logoutUser } = authSlice.actions;
 export default authSlice.reducer;

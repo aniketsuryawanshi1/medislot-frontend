@@ -10,6 +10,18 @@ const getToken = (key) => {
   return token && token !== "undefined" ? token : null;
 };
 
+// Check if token is expired
+const isTokenExpired = (token) => {
+  if (!token) return true;
+
+  try {
+    const { exp } = jwtDecode(token);
+    return dayjs.unix(exp).isBefore(dayjs());
+  } catch (error) {
+    return true;
+  }
+};
+
 // Axios instance
 const AxiosInstance = axios.create({
   baseURL: BASE_URL,
@@ -31,18 +43,6 @@ export const clearAuth = () => {
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("user");
   setAccessToken(null);
-};
-
-// Check if token is expired
-export const isTokenExpired = (token) => {
-  if (!token) return true;
-
-  try {
-    const { exp } = jwtDecode(token);
-    return dayjs.unix(exp).isBefore(dayjs());
-  } catch (error) {
-    return true;
-  }
 };
 
 // Refresh token logic
@@ -139,5 +139,8 @@ AxiosInstance.interceptors.response.use(
 
 // Initialize auth when module loads
 initializeAuth();
+
+// Export the functions used in authUtils.js
+export { getToken, isTokenExpired };
 
 export default AxiosInstance;
