@@ -1,23 +1,32 @@
+// src/services/authService.js
 import axios from "axios";
 import { jwtDecode } from "jwt-decode";
 import dayjs from "dayjs";
+import config from "../config/config";
 
-const BASE_URL = "http://localhost:8000/api/";
+const BASE_URL = config.apiBaseUrl;
 
 // Get token from localStorage safely
-const getToken = (key) => {
-  const token = localStorage.getItem(key);
-  return token && token !== "undefined" ? token : null;
+export const getToken = (key) => {
+  try {
+    const token = localStorage.getItem(key);
+    return token && token !== "undefined" && token !== "null" ? token : null;
+  } catch (error) {
+    console.error("Error getting token:", error);
+    return null;
+  }
 };
 
 // Check if token is expired
-const isTokenExpired = (token) => {
+export const isTokenExpired = (token) => {
   if (!token) return true;
 
   try {
     const { exp } = jwtDecode(token);
-    return dayjs.unix(exp).isBefore(dayjs());
+    // Add 30 second buffer before expiry
+    return dayjs.unix(exp).subtract(30, "second").isBefore(dayjs());
   } catch (error) {
+    console.error("Error decoding token:", error);
     return true;
   }
 };
@@ -25,7 +34,10 @@ const isTokenExpired = (token) => {
 // Axios instance
 const AxiosInstance = axios.create({
   baseURL: BASE_URL,
-  headers: {},
+  headers: {
+    "Content-Type": "application/json",
+  },
+  timeout: 30000, // 30 second timeout
 });
 
 // Set Authorization header globally
@@ -45,27 +57,66 @@ export const clearAuth = () => {
   setAccessToken(null);
 };
 
+// Flag to prevent multiple refresh attempts
+let isRefreshing = false;
+let refreshSubscribers = [];
+
+// Subscribe to token refresh
+const subscribeTokenRefresh = (callback) => {
+  refreshSubscribers.push(callback);
+};
+
+// Notify all subscribers when token is refreshed
+const onTokenRefreshed = (token) => {
+  refreshSubscribers.forEach((callback) => callback(token));
+  refreshSubscribers = [];
+};
+
 // Refresh token logic
 export const refreshAccessToken = async () => {
   const refreshToken = getToken("refreshToken");
+
   if (!refreshToken) {
     throw new Error("No refresh token found");
   }
 
+  if (isRefreshing) {
+    // Return a promise that resolves when the token is refreshed
+    return new Promise((resolve) => {
+      subscribeTokenRefresh((token) => {
+        resolve(token);
+      });
+    });
+  }
+
+  isRefreshing = true;
+
   try {
-    // Fixed: Use the correct endpoint path
     const response = await axios.post(`${BASE_URL}auth/token/refresh/`, {
       refresh: refreshToken,
     });
 
     const newAccessToken = response.data.access;
+
+    if (!newAccessToken) {
+      throw new Error("No access token in refresh response");
+    }
+
     localStorage.setItem("accessToken", newAccessToken);
     setAccessToken(newAccessToken);
+
+    isRefreshing = false;
+    onTokenRefreshed(newAccessToken);
 
     return newAccessToken;
   } catch (error) {
     console.error("Token refresh failed:", error);
+    isRefreshing = false;
     clearAuth();
+
+    // Dispatch custom event for logout
+    window.dispatchEvent(new CustomEvent("auth:logout"));
+
     throw error;
   }
 };
@@ -83,6 +134,18 @@ export const initializeAuth = () => {
 // Request interceptor
 AxiosInstance.interceptors.request.use(
   async (request) => {
+    // Skip token refresh for auth endpoints
+    const isAuthEndpoint = request.url?.includes("/auth/");
+
+    if (
+      isAuthEndpoint &&
+      (request.url?.includes("/login") ||
+        request.url?.includes("/register") ||
+        request.url?.includes("/token/refresh"))
+    ) {
+      return request;
+    }
+
     const token = getToken("accessToken");
 
     if (!token) {
@@ -96,8 +159,8 @@ AxiosInstance.interceptors.request.use(
         request.headers.Authorization = `Bearer ${newToken}`;
         return request;
       } catch (error) {
+        console.error("Request interceptor: Token refresh failed", error);
         clearAuth();
-        // Don't redirect here, let the context handle it
         return Promise.reject(error);
       }
     } else {
@@ -117,8 +180,19 @@ AxiosInstance.interceptors.response.use(
     const originalRequest = error.config;
     const status = error.response?.status;
 
-    // Handle 401/403 errors
-    if ((status === 401 || status === 403) && !originalRequest._retry) {
+    // Don't retry for auth endpoints
+    const isAuthEndpoint = originalRequest.url?.includes("/auth/");
+
+    if (
+      isAuthEndpoint &&
+      (originalRequest.url?.includes("/login") ||
+        originalRequest.url?.includes("/register"))
+    ) {
+      return Promise.reject(error);
+    }
+
+    // Handle 401 errors with token refresh
+    if (status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
       try {
@@ -126,8 +200,11 @@ AxiosInstance.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
         return AxiosInstance(originalRequest);
       } catch (refreshError) {
+        console.error(
+          "Response interceptor: Token refresh failed",
+          refreshError
+        );
         clearAuth();
-        // Let the context handle logout
         window.dispatchEvent(new CustomEvent("auth:logout"));
         return Promise.reject(refreshError);
       }
@@ -139,8 +216,5 @@ AxiosInstance.interceptors.response.use(
 
 // Initialize auth when module loads
 initializeAuth();
-
-// Export the functions used in authUtils.js
-export { getToken, isTokenExpired };
 
 export default AxiosInstance;

@@ -1,3 +1,4 @@
+// src/pages/Patientdashboard.jsx
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -9,13 +10,14 @@ import {
   Plus,
   Search,
   Filter,
+  AlertCircle,
 } from "lucide-react";
-import useAuth from "../hooks/useAuth"; // Added for user and logout
-import usePatient from "../hooks/usePatient"; // Added for patient data
+import useAuth from "../hooks/useAuth";
+import usePatient from "../hooks/usePatient";
 
 const PatientDashboard = () => {
   const navigate = useNavigate();
-  const { user, logout } = useAuth(); // Use Redux user and logout
+  const { user, logout, isAuthenticated } = useAuth();
   const {
     profiles: patientProfiles,
     appointments,
@@ -23,23 +25,35 @@ const PatientDashboard = () => {
     fetchAppointments,
     loading,
     error,
-  } = usePatient(); // Use Redux for patient data
+  } = usePatient();
 
   const [upcomingAppointments, setUpcomingAppointments] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [dataError, setDataError] = useState("");
+
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigate("/login", { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   useEffect(() => {
     fetchDashboardData();
   }, []);
 
   useEffect(() => {
-    if (Array.isArray(appointments)) {
-      // Ensure appointments is an array
+    if (Array.isArray(appointments) && appointments.length > 0) {
       const now = new Date();
       const upcoming = appointments.filter((apt) => {
-        const aptDate = new Date(apt.appointment_date);
-        return aptDate >= now && apt.status !== "cancelled";
+        try {
+          const aptDate = new Date(apt.appointment_date);
+          return aptDate >= now && apt.status !== "cancelled";
+        } catch (err) {
+          console.error("Error parsing appointment date:", err);
+          return false;
+        }
       });
       setUpcomingAppointments(upcoming);
     }
@@ -47,19 +61,22 @@ const PatientDashboard = () => {
 
   const fetchDashboardData = async () => {
     try {
-      await Promise.all([fetchProfiles(), fetchAppointments()]); // Use thunks
+      setDataError("");
+      await Promise.all([fetchProfiles(), fetchAppointments()]);
     } catch (err) {
       console.error("Error fetching dashboard data:", err);
+      setDataError("Failed to load dashboard data. Please refresh the page.");
     }
   };
 
   const handleLogout = async () => {
     try {
-      await logout(); // Use Redux logout
-      navigate("/login");
+      await logout();
+      navigate("/login", { replace: true });
     } catch (err) {
       console.error("Logout error:", err);
-      navigate("/login");
+      // Force logout even if API call fails
+      navigate("/login", { replace: true });
     }
   };
 
@@ -73,7 +90,6 @@ const PatientDashboard = () => {
     return colors[status] || "bg-gray-100 text-gray-800 border-gray-200";
   };
 
-  // Ensure appointments is an array before filtering
   const filteredAppointments = Array.isArray(appointments)
     ? appointments.filter((apt) => {
         const matchesSearch =
@@ -85,31 +101,22 @@ const PatientDashboard = () => {
       })
     : [];
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-green-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-blue-600"></div>
-      </div>
-    );
-  }
-
-  if (error) {
+  if (loading && (!appointments || appointments.length === 0)) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-green-50 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-red-600">Error loading dashboard: {error}</p>
-          <button
-            onClick={fetchDashboardData}
-            className="mt-4 bg-blue-600 text-white px-4 py-2 rounded"
-          >
-            Retry
-          </button>
+          <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading dashboard...</p>
         </div>
       </div>
     );
   }
 
-  const userProfile = patientProfiles?.[0] || {}; // Assume first profile or empty object
+  const displayError = dataError || error;
+  const userProfile =
+    Array.isArray(patientProfiles) && patientProfiles.length > 0
+      ? patientProfiles[0]
+      : {};
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-green-50 to-teal-50">
@@ -146,6 +153,7 @@ const PatientDashboard = () => {
               <button
                 onClick={() => navigate("/notifications/logs")}
                 className="relative p-2 text-gray-600 hover:text-blue-600 transition-colors"
+                title="Notifications"
               >
                 <Bell className="w-6 h-6" />
                 <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full"></span>
@@ -163,6 +171,7 @@ const PatientDashboard = () => {
                 <button
                   onClick={handleLogout}
                   className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  title="Logout"
                 >
                   <LogOut className="w-5 h-5" />
                 </button>
@@ -173,6 +182,22 @@ const PatientDashboard = () => {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Error Display */}
+        {displayError && (
+          <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start">
+            <AlertCircle className="w-5 h-5 text-red-600 mr-3 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-red-800">{displayError}</p>
+              <button
+                onClick={fetchDashboardData}
+                className="mt-2 text-sm text-red-600 hover:text-red-700 underline"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Welcome Section */}
         <div className="bg-gradient-to-r from-blue-600 to-green-600 rounded-2xl shadow-xl p-8 mb-8 text-white relative overflow-hidden">
           <div className="relative z-10">
@@ -188,7 +213,6 @@ const PatientDashboard = () => {
             </p>
           </div>
 
-          {/* Animated Background Elements */}
           <svg
             className="absolute right-0 top-0 w-64 h-64 opacity-20"
             viewBox="0 0 200 200"
@@ -358,22 +382,22 @@ const PatientDashboard = () => {
             <div className="space-y-4">
               {filteredAppointments.map((appointment) => (
                 <div
-                  key={appointment.id}
+                  key={appointment.id || appointment.uuid}
                   className="border border-gray-200 rounded-xl p-5 hover:shadow-lg transition-all bg-gradient-to-r from-gray-50 to-white"
                 >
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
                         <h4 className="text-lg font-semibold text-gray-800">
-                          Dr. {appointment.doctor_name}
+                          Dr. {appointment.doctor_name || "Unknown"}
                         </h4>
                         <span
                           className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(
                             appointment.status
                           )}`}
                         >
-                          {appointment.status.charAt(0).toUpperCase() +
-                            appointment.status.slice(1)}
+                          {appointment.status?.charAt(0).toUpperCase() +
+                            appointment.status?.slice(1) || "Unknown"}
                         </span>
                       </div>
 
@@ -381,28 +405,31 @@ const PatientDashboard = () => {
                         <div className="flex items-center gap-2">
                           <Calendar className="w-4 h-4 text-blue-600" />
                           <span>
-                            {new Date(
-                              appointment.appointment_date
-                            ).toLocaleDateString("en-US", {
-                              weekday: "long",
-                              year: "numeric",
-                              month: "long",
-                              day: "numeric",
-                            })}
+                            {appointment.appointment_date
+                              ? new Date(
+                                  appointment.appointment_date
+                                ).toLocaleDateString("en-US", {
+                                  weekday: "long",
+                                  year: "numeric",
+                                  month: "long",
+                                  day: "numeric",
+                                })
+                              : "Date not available"}
                           </span>
                         </div>
 
                         <div className="flex items-center gap-2">
                           <Clock className="w-4 h-4 text-green-600" />
                           <span>
-                            {appointment.start_time} - {appointment.end_time}
+                            {appointment.start_time || "00:00"} -{" "}
+                            {appointment.end_time || "00:00"}
                           </span>
                         </div>
 
                         <div className="flex items-center gap-2">
                           <User className="w-4 h-4 text-purple-600" />
                           <span className="font-medium">
-                            {appointment.service_type}
+                            {appointment.service_type || "Service"}
                           </span>
                         </div>
 

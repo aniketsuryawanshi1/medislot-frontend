@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+// src/pages/Login.jsx
+import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,45 +18,83 @@ import {
 } from "../components/ui/form";
 
 const loginSchema = z.object({
-  email: z.string().email("Invalid email address"), // Changed from username
+  email: z.string().email("Invalid email address"),
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
 const Login = () => {
   const navigate = useNavigate();
-  const { login, loading, error } = useAuth(); // Removed user from Redux state
+  const { login, loading, error, isAuthenticated, user, clearError } =
+    useAuth();
   const [showPassword, setShowPassword] = useState(false);
+  const [loginError, setLoginError] = useState("");
 
   const form = useForm({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      email: "", // Changed from username
+      email: "",
       password: "",
     },
   });
 
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      const role = user.role;
+      if (role === "is_doctor" || role === "doctor") {
+        navigate("/doctor/dashboard", { replace: true });
+      } else if (role === "is_patient" || role === "patient") {
+        navigate("/patient/dashboard", { replace: true });
+      }
+    }
+  }, [isAuthenticated, user, navigate]);
+
+  // Clear errors when component unmounts
+  useEffect(() => {
+    return () => {
+      clearError();
+      setLoginError("");
+    };
+  }, [clearError]);
+
   const onSubmit = async (data) => {
     try {
-      // use unwrap to throw on rejected promise
+      setLoginError("");
+
+      // Dispatch login action and unwrap the result
       const resultAction = await login(data);
-      // if using RTK, resultAction.payload available; or use .unwrap() if returned by dispatch
-      // Try unwrap (if using dispatch(login).unwrap() in caller, adjust)
-      // If login was dispatched directly (not unwrapped), check resultAction.payload
-      const payload = resultAction?.payload || resultAction;
-      // determine user
-      const user = payload?.user || JSON.parse(localStorage.getItem("user"));
-      if (user?.role === "is_doctor" || user?.role === "doctor") {
-        navigate("/doctor/dashboard");
-      } else if (user?.role === "is_patient" || user?.role === "patient") {
-        navigate("/patient/dashboard");
+
+      // Check if login was successful
+      if (resultAction.type && resultAction.type.endsWith("/fulfilled")) {
+        const payload = resultAction.payload;
+        const user =
+          payload?.user || JSON.parse(localStorage.getItem("user") || "{}");
+
+        // Navigate based on user role
+        if (user?.role === "is_doctor" || user?.role === "doctor") {
+          navigate("/doctor/dashboard", { replace: true });
+        } else if (user?.role === "is_patient" || user?.role === "patient") {
+          navigate("/patient/dashboard", { replace: true });
+        } else {
+          setLoginError("Unknown user role. Please contact support.");
+        }
       } else {
-        navigate("/"); // fallback
+        // Handle rejected action
+        const errorMsg =
+          resultAction.payload || resultAction.error?.message || "Login failed";
+        setLoginError(
+          typeof errorMsg === "string"
+            ? errorMsg
+            : "Login failed. Please try again."
+        );
       }
     } catch (err) {
-      // If you used dispatch(login).unwrap(), you'd catch here
-      console.error("Login failed:", err);
+      console.error("Login error:", err);
+      setLoginError("An unexpected error occurred. Please try again.");
     }
   };
+
+  const displayError = loginError || error;
 
   return (
     <div className="min-h-screen flex">
@@ -103,20 +142,29 @@ const Login = () => {
 
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              {error && (
+              {displayError && (
                 <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg text-sm">
-                  {error}
+                  {typeof displayError === "object"
+                    ? JSON.stringify(displayError)
+                    : displayError}
                 </div>
               )}
 
               <FormField
                 control={form.control}
-                name="email" // Changed from username
+                name="email"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Email</FormLabel>
                     <FormControl>
-                      <Input placeholder="Enter your email" {...field} />
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                        <Input
+                          placeholder="Enter your email"
+                          className="pl-10"
+                          {...field}
+                        />
+                      </div>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -160,6 +208,13 @@ const Login = () => {
                   />
                   <span className="text-sm text-gray-600">Remember me</span>
                 </label>
+
+                <Link
+                  to="/password-reset"
+                  className="text-sm text-teal-600 hover:text-teal-700 font-medium"
+                >
+                  Forgot password?
+                </Link>
               </div>
 
               <Button
@@ -218,15 +273,6 @@ const Login = () => {
               Privacy Policy
             </a>
           </div>
-
-          <p className="text-sm text-right mt-2">
-            <Link
-              to="/password-reset"
-              className="text-blue-600 hover:underline"
-            >
-              Forgot password?
-            </Link>
-          </p>
         </div>
       </div>
     </div>
